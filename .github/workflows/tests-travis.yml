@@ -1,0 +1,264 @@
+name: 'Tests: Travis CI migration'
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    permissions:
+      contents: read
+
+    name: 'fast (${{ matrix.shell }})'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: 'script -q -e -c "${{ matrix.shell }} {0}"'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - sh
+          - bash
+          - dash
+          - zsh
+          # - ksh
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          allowed-endpoints:
+            github.com:443
+            registry.npmjs.org:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            iojs.org:443
+            unofficial-builds.nodejs.org:443
+            azure.archive.ubuntu.com:80
+            packages.microsoft.com:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update; sudo apt-get install ${{ matrix.shell }}
+        if: matrix.shell == 'zsh' || matrix.shell == 'ksh'
+        shell: bash
+      - run: sudo ${{ matrix.shell }} --version 2> /dev/null || dpkg -s ${{ matrix.shell }} 2> /dev/null || which ${{ matrix.shell }}
+      - run: curl --version
+      - run: wget --version
+      - uses: ljharb/actions/node/install@main
+        name: 'npm install && version checks'
+        with:
+          node-version: 'lts/*'
+          skip-ls-check: true
+      - run: npm ls urchin
+      - run: npx which urchin
+      - run: env
+      - name: Run fast tests
+        run: |
+          URCHIN_PATH="$(npx which urchin)"
+          unset NVM_CD_FLAGS NVM_BIN NVM_INC
+          export NVM_DIR="${{ github.workspace }}"
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.nvm' | tr '\n' ':')"
+          make TERM=xterm-256color TEST_SUITE="fast" SHELL="${{ matrix.shell }}" URCHIN="$URCHIN_PATH" test-${{ matrix.shell }}
+
+  installation_iojs_without_curl:
+    permissions:
+      contents: read
+
+    name: 'installation_iojs without curl (${{ matrix.shell }})'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: 'script -q -e -c "${{ matrix.shell }} {0}"'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - sh
+          - bash
+          - dash
+          - zsh
+          # - ksh
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          allowed-endpoints:
+            github.com:443
+            registry.npmjs.org:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            iojs.org:443
+            azure.archive.ubuntu.com:80
+            packages.microsoft.com:443
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update; sudo apt-get install ${{ matrix.shell }}
+        if: matrix.shell == 'zsh' || matrix.shell == 'ksh'
+        shell: bash
+      - run: sudo ${{ matrix.shell }} --version 2> /dev/null || dpkg -s ${{ matrix.shell }} 2> /dev/null || which ${{ matrix.shell }}
+      - run: wget --version
+      - uses: ljharb/actions/node/install@main
+        name: 'npm install && version checks'
+        with:
+          node-version: 'lts/*'
+          skip-ls-check: true
+      - run: npm ls urchin
+      - run: npx which urchin
+      - name: Remove curl
+        run: sudo apt-get remove curl -y
+        shell: bash
+      - run: '! command -v curl'
+        shell: bash
+      - run: env
+      - name: Run installation_iojs tests
+        run: |
+          URCHIN_PATH="$(npx which urchin)"
+          unset NVM_CD_FLAGS NVM_BIN NVM_INC
+          export NVM_DIR="${{ github.workspace }}"
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.nvm' | tr '\n' ':')"
+          make TERM=xterm-256color TEST_SUITE="installation_iojs" SHELL="${{ matrix.shell }}" URCHIN="$URCHIN_PATH" test-${{ matrix.shell }}
+      - name: Restore curl
+        if: always()
+        run: sudo apt-get install curl -y
+        shell: bash
+
+  installation_node:
+    permissions:
+      contents: read
+
+    name: "installation_node (${{ matrix.shell }}${{ matrix.without_curl && ', without curl' || '' }})"
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: 'script -q -e -c "${{ matrix.shell }} {0}"'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - sh
+          - bash
+          - dash
+          - zsh
+          # - ksh
+        without_curl:
+          - false
+          - true
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          allowed-endpoints:
+            github.com:443
+            registry.npmjs.org:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            iojs.org:443
+            azure.archive.ubuntu.com:80
+            packages.microsoft.com:443
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update; sudo apt-get install ${{ matrix.shell }}
+        if: matrix.shell == 'zsh' || matrix.shell == 'ksh'
+        shell: bash
+      - run: sudo ${{ matrix.shell }} --version 2> /dev/null || dpkg -s ${{ matrix.shell }} 2> /dev/null || which ${{ matrix.shell }}
+      - run: curl --version
+        if: ${{ !matrix.without_curl }}
+      - run: wget --version
+      - uses: ljharb/actions/node/install@main
+        name: 'npm install && version checks'
+        with:
+          node-version: 'lts/*'
+          skip-ls-check: true
+      - run: npm ls urchin
+      - run: npx which urchin
+      - name: Remove curl
+        if: ${{ matrix.without_curl }}
+        run: sudo apt-get remove curl -y
+        shell: bash
+      - name: Verify curl removed
+        if: ${{ matrix.without_curl }}
+        run: '! command -v curl'
+        shell: bash
+      - run: env
+      - name: Run installation_node tests
+        run: |
+          URCHIN_PATH="$(npx which urchin)"
+          unset NVM_CD_FLAGS NVM_BIN NVM_INC
+          export NVM_DIR="${{ github.workspace }}"
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.nvm' | tr '\n' ':')"
+          make TERM=xterm-256color TEST_SUITE="installation_node" SHELL="${{ matrix.shell }}" URCHIN="$URCHIN_PATH" test-${{ matrix.shell }}
+      - name: Restore curl
+        if: ${{ always() && matrix.without_curl }}
+        run: sudo apt-get install curl -y
+        shell: bash
+
+  xenial:
+    permissions:
+      contents: read
+
+    name: 'xenial (${{ matrix.shell }})'
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: 'script -q -e -c "${{ matrix.shell }} {0}"'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - sh
+          - bash
+          - dash
+          - zsh
+          # - ksh
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          allowed-endpoints:
+            github.com:443
+            registry.npmjs.org:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            iojs.org:443
+            azure.archive.ubuntu.com:80
+            packages.microsoft.com:443
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update; sudo apt-get install ${{ matrix.shell }}
+        if: matrix.shell == 'zsh' || matrix.shell == 'ksh'
+        shell: bash
+      - run: sudo ${{ matrix.shell }} --version 2> /dev/null || dpkg -s ${{ matrix.shell }} 2> /dev/null || which ${{ matrix.shell }}
+      - run: curl --version
+      - run: wget --version
+      - uses: ljharb/actions/node/install@main
+        name: 'npm install && version checks'
+        with:
+          node-version: 'lts/*'
+          skip-ls-check: true
+      - run: npm ls urchin
+      - run: npx which urchin
+      - run: env
+      - name: Run xenial tests
+        run: |
+          URCHIN_PATH="$(npx which urchin)"
+          unset NVM_CD_FLAGS NVM_BIN NVM_INC
+          export NVM_DIR="${{ github.workspace }}"
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.nvm' | tr '\n' ':')"
+          make TERM=xterm-256color TEST_SUITE="xenial" SHELL="${{ matrix.shell }}" URCHIN="$URCHIN_PATH" test-${{ matrix.shell }}
+
+  travis-tests:
+    permissions:
+      contents: none
+    name: 'all Travis-migrated tests'
+    needs: [fast, installation_iojs_without_curl, installation_node, xenial]
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
